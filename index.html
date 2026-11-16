@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1f2937">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Job Time Tracker</title>
+<style>
+:root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--blue:#2563eb;--green:#15803d;--orange:#ea580c;--red:#dc2626}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Arial,Helvetica,sans-serif;color:var(--text);font-size:16px}
+header{background:#1f2937;color:white;padding:16px;padding-top:max(16px,env(safe-area-inset-top));position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:22px}.sub{font-size:13px;color:#d1d5db;margin-top:4px}
+main{max-width:800px;margin:auto;padding:14px 14px 90px}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px #0001}
+h2{font-size:18px;margin:0 0 12px}.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}
+input,select,button{font:inherit;border-radius:8px;padding:11px;border:1px solid var(--line)}input,select{width:100%;background:#fff;color:var(--text)}
+button{border:0;color:white;font-weight:700;cursor:pointer;background:var(--blue)}
+button.secondary{background:#4b5563}button.green{background:var(--green)}button.orange{background:var(--orange)}button.red{background:var(--red)}
+button.link{background:none;color:var(--blue);font-weight:400;padding:8px}button.wide{width:100%}
+.status{padding:12px;border-radius:9px;background:#eff6ff;border:1px solid #bfdbfe;margin-bottom:12px}.status strong{display:block;font-size:16px}.status span{font-size:13px;color:var(--muted)}
+.status.work{background:#f0fdf4;border-color:#bbf7d0}.status.travel{background:#fff7ed;border-color:#fed7aa}
+.bigtime{font-size:34px;font-weight:700;text-align:center;margin:10px 0;font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
+.stat{background:#f9fafb;border-radius:9px;padding:10px;text-align:center}.stat b{display:block;font-size:19px}.stat span{font-size:11px;color:var(--muted)}
+.stat.total{background:#eff6ff}
+.job{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:9px}.job.active{border-color:#86efac;background:#f0fdf4}
+.jobhead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.jobname{font-weight:700}.pill{font-size:12px;padding:4px 8px;border-radius:99px;background:#e5e7eb;white-space:nowrap;font-weight:700}.pill.ok{background:#dcfce7;color:#166534}
+.details{font-size:13px;color:var(--muted);margin-top:7px;line-height:1.5}.live{color:var(--green);font-weight:700}
+.actions{display:flex;gap:7px;margin-top:9px}.actions button{flex:1;padding:9px;font-size:13px}
+.empty{text-align:center;color:var(--muted);padding:18px}.small{font-size:12px;color:var(--muted)}
+.cardhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.cardhead h2{margin:0}
+.lbl{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.weeknav{display:flex;gap:8px;margin-bottom:10px}.weeknav input{flex:1}.weeknav button{width:52px}
+.day{border-top:1px solid #e5e7eb}.day:first-child{border-top:0}
+.dayhead{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 2px;width:100%;background:none;color:var(--text);font-weight:400;text-align:left;border-radius:0}
+.dayhead b{font-weight:700}.dayhead .right{display:flex;gap:6px;align-items:center;font-size:14px}
+.daybody{padding:0 0 12px}.noday{display:flex;justify-content:space-between;align-items:center;padding:6px 2px;color:var(--muted);font-size:14px}
+.noday button{padding:6px 10px;font-size:13px}
+details.card summary{font-weight:700;font-size:18px;cursor:pointer}
+dialog{border:0;border-radius:12px;padding:18px;width:min(460px,94vw);box-shadow:0 10px 40px #0004}
+dialog::backdrop{background:#0007}
+.hm{display:flex;gap:8px}.hm label{flex:1;display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}.hm input{flex:1;min-width:0}
+.dlgtotal{margin:14px 0;padding:10px;background:#eff6ff;border-radius:8px;text-align:center}
+@media(max-width:520px){main{padding:10px 10px 80px}}
+</style>
+</head>
+<body>
+<header>
+<h1>Job Time Tracker</h1><div class="sub" id="headerSub"></div>
+</header>
+<main>
+<details class="card" id="settings">
+<summary>Settings</summary>
+<label class="lbl" for="setName">Your name</label>
+<input id="setName" autocomplete="name" placeholder="First and last name">
+<label class="lbl" for="setEmail">Office email (where weekly time is sent)</label>
+<input id="setEmail" type="email" autocomplete="email" placeholder="accounting@superiorpmw.com">
+<p class="small">Your time is saved on this phone as you go.</p>
+</details>
+
+<section class="card">
+<div class="status" id="statusBox"><strong id="statusTitle"></strong><span id="statusText"></span></div>
+<div class="bigtime" id="liveTimer">00:00:00</div>
+<label class="lbl" id="jobLabel" for="jobName">Job</label>
+<div class="row"><input id="jobName" list="jobNames" placeholder="Customer / job" autocomplete="off"><select id="jobNumber" aria-label="Job #"></select></div>
+<div class="row" id="timerButtons" style="margin-top:10px"></div>
+<p class="small">The timer keeps counting if you lock your phone or switch apps.</p>
+</section>
+
+<section class="card">
+<div class="cardhead"><h2>Today</h2><span id="todaySaved" class="pill ok" hidden>Saved ✓</span></div>
+<div class="stats">
+<div class="stat"><b id="todayTravel">0h 00m</b><span>Travel</span></div>
+<div class="stat"><b id="todayWork">0h 00m</b><span>Work</span></div>
+<div class="stat total"><b id="todayTotal">0h 00m</b><span>Billable</span></div>
+</div>
+<div id="todayJobs"></div>
+<div class="row" style="margin-top:12px"><button class="secondary" id="addTodayBtn" data-action="add">+ Add Job by Hand</button><button id="endDayBtn" class="red">End Day &amp; Save</button></div>
+</section>
+
+<section class="card">
+<h2>Week</h2>
+<div class="weeknav"><button class="secondary" id="prevWeek" aria-label="Previous week">◀</button><input type="date" id="weekStart" aria-label="Week starting"><button class="secondary" id="nextWeek" aria-label="Next week">▶</button></div>
+<div id="weekDays"></div>
+<div class="stats" style="margin-top:10px">
+<div class="stat"><b id="weekTravel">0h 00m</b><span>Travel</span></div>
+<div class="stat"><b id="weekWork">0h 00m</b><span>Work</span></div>
+<div class="stat total"><b id="weekTotal">0h 00m</b><span>Billable</span></div>
+</div>
+<button id="sendBtn" class="green wide" style="margin-top:8px">Send Week to Office</button>
+<p class="small" id="sendHint"></p>
+<button id="csvBtn" class="link wide">Download CSV instead</button>
+</section>
+</main>
+<datalist id="jobNames"></datalist>
+
+<dialog id="jobDialog">
+<form id="jobForm">
+<h2 id="dlgTitle">Edit Job</h2>
+<label class="lbl" for="fDate">Date</label><input id="fDate" type="date" required>
+<label class="lbl" for="fName">Job name or customer</label><input id="fName" list="jobNames" autocomplete="off" required>
+<label class="lbl" for="fNumber">Job #</label><select id="fNumber"></select>
+<span class="lbl">Travel time to this job</span>
+<div class="hm"><label><input id="fTravelH" type="number" min="0" inputmode="numeric">hr</label><label><input id="fTravelM" type="number" min="0" inputmode="numeric">min</label></div>
+<span class="lbl">Time worked at this job</span>
+<div class="hm"><label><input id="fWorkH" type="number" min="0" inputmode="numeric">hr</label><label><input id="fWorkM" type="number" min="0" inputmode="numeric">min</label></div>
+<div class="dlgtotal">Billable: <b id="fTotal">0h 00m</b></div>
+<div class="row"><button type="button" class="secondary" id="dlgCancel">Cancel</button><button type="submit" class="green">Save</button></div>
+</form>
+</dialog>
+
+<script>
+const KEY='job-time-tracker-v3';
+const $=id=>document.getElementById(id);
+const OFFICE_EMAIL='accounting@superiorpmw.com';
+const JOB_CODES=['Plumbing-01','Heating-02','Plumbing-21','Heating-22','Plumbing-11','Heating-12','Service-3','Maintenance-4','Septic-5','Sales-6'];
+let state=load();
+// Phones that saved settings before the office email was built in get it too.
+if(!state.settings.email)state.settings.email=OFFICE_EMAIL;
+let weekStart=mondayOf(todayKey());
+const openDays=new Set();
+let editing=null;
+
+function load(){
+  try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.days)return s}catch(e){}
+  return {settings:{name:'',email:''},days:{},current:null};
+}
+function save(){localStorage.setItem(KEY,JSON.stringify(state))}
+
+// Dates are local-time "YYYY-MM-DD" keys.
+function dkey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function todayKey(){return dkey(new Date())}
+function addDays(k,n){const d=new Date(k+'T12:00:00');d.setDate(d.getDate()+n);return dkey(d)}
+function mondayOf(k){return addDays(k,-((new Date(k+'T12:00:00').getDay()+6)%7))}
+function weekKeys(){return [0,1,2,3,4,5,6].map(i=>addDays(weekStart,i))}
+function dayLabel(k,opts){return new Date(k+'T12:00:00').toLocaleDateString(undefined,opts||{weekday:'short',month:'short',day:'numeric'})}
+function timeLabel(ms){return new Date(ms).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+function startLabel(ms){const k=dkey(new Date(ms));return (k===todayKey()?'':dayLabel(k)+' ')+timeLabel(ms)}
+
+function mins(ms){return Math.round((ms||0)/60000)}
+function hm(m){return Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m'}
+function hours(m){return (m/60).toFixed(2)}
+function clock(ms){const t=Math.floor(ms/1000);return [Math.floor(t/3600),Math.floor(t%3600/60),t%60].map(n=>String(n).padStart(2,'0')).join(':')}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function newId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
+
+function day(k){return state.days[k]||(state.days[k]={jobs:[],saved:false})}
+function jobsOn(k){return state.days[k]?.jobs||[]}
+function findJob(k,id){return jobsOn(k).find(j=>j.id===id)}
+function elapsed(){return state.current?Math.max(0,Date.now()-state.current.startedAt):0}
+function isActive(j){return state.current?.type==='work'&&state.current.jobId===j.id}
+function workMs(j,live){return (j.workMs||0)+(live&&isActive(j)?elapsed():0)}
+// Minutes are rounded per job, then summed, so the app matches the CSV.
+function totalsFor(keys,live){
+  let travel=0,work=0;
+  keys.forEach(k=>jobsOn(k).forEach(j=>{travel+=mins(j.travelMs);work+=mins(workMs(j,live))}));
+  return {travel,work,total:travel+work};
+}
+
+/* ---------- Timer ---------- */
+function startWork(travelMs){
+  const name=$('jobName').value.trim(),number=$('jobNumber').value.trim();
+  if(!name){alert('Enter the job name or customer first.');$('jobName').focus();return}
+  const k=todayKey(),t=Date.now(),id=newId();
+  day(k).jobs.push({id,name,number,travelMs:travelMs||0,workMs:0,startedAt:t,endedAt:null});
+  day(k).saved=false;
+  state.current={type:'work',date:k,jobId:id,startedAt:t};
+  $('jobName').value='';$('jobNumber').value='';
+  render();
+}
+function finishWork(){
+  const c=state.current;if(c?.type!=='work')return;
+  const j=findJob(c.date,c.jobId),t=Date.now();
+  if(j){j.workMs=(j.workMs||0)+(t-c.startedAt);j.endedAt=t}
+  state.current=null;
+}
+const timerActions={
+  'start-travel':()=>{state.current={type:'travel',startedAt:Date.now()};render()},
+  'start-work':()=>startWork(0),
+  'arrive':()=>startWork(elapsed()),
+  'cancel-travel':()=>{if(confirm('Stop travel without saving it? (Use this for the drive home.)')){state.current=null;render()}},
+  'leave':()=>{finishWork();state.current={type:'travel',startedAt:Date.now()};render()},
+  'finish':()=>{finishWork();render()}
+};
+
+/* ---------- Rendering ---------- */
+function render(){
+  const k=todayKey(),c=state.current,s=state.settings;
+  $('headerSub').textContent=(s.name?s.name+' · ':'')+dayLabel(k,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  let title,text,label,btns,cls='';
+  if(!c){
+    title='Ready';text='Enter a job, then start travel or work.';label='Job';
+    btns=[['start-travel','orange','Start Travel'],['start-work','green','Start Work']];
+  }else if(c.type==='travel'){
+    cls='travel';title='Traveling';label='Traveling to';
+    text='Started '+startLabel(c.startedAt)+'. Enter the job you are going to, then tap Arrived.';
+    btns=[['arrive','green','Arrived – Start Work'],['cancel-travel','secondary','Stop Travel (not billed)']];
+  }else{
+    const j=findJob(c.date,c.jobId);
+    cls='work';title='Working: '+(j?.name||'Job');label='Next job (optional)';
+    text='Started '+startLabel(c.startedAt)+'.';
+    btns=[['leave','orange','Leave – Travel to Next Job'],['finish','red','Finish Job']];
+  }
+  $('statusBox').className='status '+cls;
+  $('statusTitle').textContent=title;$('statusText').textContent=text;$('jobLabel').textContent=label;
+  $('timerButtons').innerHTML=btns.map(([a,c2,t])=>`<button class="${c2}" data-action="${a}">${t}</button>`).join('');
+
+  $('todaySaved').hidden=!state.days[k]?.saved;
+  $('todayJobs').innerHTML=jobsHtml(k)||'<div class="empty">No jobs yet today.</div>';
+  $('addTodayBtn').dataset.date=k;
+
+  renderWeek();
+  const names=[...new Set(Object.keys(state.days).sort().reverse().flatMap(d=>jobsOn(d).map(j=>j.name)))];
+  $('jobNames').innerHTML=names.map(n=>`<option value="${esc(n)}">`).join('');
+  $('sendHint').textContent=s.email?`Choose your email app, send to ${s.email}. The CSV file is attached for you.`:'Add the office email in Settings first.';
+  if(!s.name||!s.email)$('settings').open=true;
+  tick();save();
+}
+function jobsHtml(k){
+  return jobsOn(k).map(j=>{
+    const a=isActive(j),t=mins(j.travelMs),w=mins(workMs(j,true));
+    const times=j.startedAt?'<br>'+timeLabel(j.startedAt)+(j.endedAt?' – '+timeLabel(j.endedAt):''):'';
+    const note=j.manual?'<br>Added by hand':j.edited?'<br>Times edited':'';
+    return `<div class="job${a?' active':''}"><div class="jobhead"><div class="jobname">${esc(j.name)}${j.number?' <span class="small" style="white-space:nowrap">'+esc(j.number)+'</span>':''}</div>
+    <span class="pill"${a?' data-live="total"':''}>${hm(t+w)}</span></div>
+    <div class="details">Travel <b>${hm(t)}</b> · Work <b${a?' data-live="work"':''}>${hm(w)}</b>${a?' · <span class="live">In progress</span>':''}${times}${note}</div>
+    <div class="actions"><button class="secondary" data-action="edit" data-date="${k}" data-id="${j.id}">Edit</button><button class="red" data-action="delete" data-date="${k}" data-id="${j.id}">Delete</button></div></div>`;
+  }).join('');
+}
+function renderWeek(){
+  $('weekStart').value=weekStart;
+  $('weekDays').innerHTML=weekKeys().map(k=>{
+    const jobs=jobsOn(k);
+    if(!jobs.length)return `<div class="day"><div class="noday"><span>${dayLabel(k)}</span><button class="secondary" data-action="add" data-date="${k}">+ Add</button></div></div>`;
+    const t=totalsFor([k],true),open=openDays.has(k);
+    return `<div class="day"><button class="dayhead" data-action="toggle-day" data-date="${k}" aria-expanded="${open}">
+      <span><b>${dayLabel(k)}</b> <span class="small">${jobs.length} job${jobs.length===1?'':'s'}</span></span>
+      <span class="right">${state.days[k].saved?'<span class="pill ok">Saved</span>':''}<b>${hm(t.total)}</b> ${open?'▲':'▼'}</span></button>
+      ${open?`<div class="daybody">${jobsHtml(k)}<div class="row" style="margin-top:8px"><button class="secondary" data-action="add" data-date="${k}">+ Add Job</button><button class="link" data-action="delete-day" data-date="${k}" style="color:var(--red)">Delete Day</button></div></div>`:''}</div>`;
+  }).join('');
+}
+// Updates only text that changes every second, so buttons are never replaced mid-tap.
+function tick(){
+  $('liveTimer').textContent=clock(elapsed());
+  const t=totalsFor([todayKey()],true),w=totalsFor(weekKeys(),true);
+  $('todayTravel').textContent=hm(t.travel);$('todayWork').textContent=hm(t.work);$('todayTotal').textContent=hm(t.total);
+  $('weekTravel').textContent=hm(w.travel);$('weekWork').textContent=hm(w.work);$('weekTotal').textContent=hm(w.total);
+  const c=state.current,j=c?.type==='work'&&findJob(c.date,c.jobId);
+  if(j){
+    const work=mins(workMs(j,true));
+    document.querySelectorAll('[data-live="work"]').forEach(el=>el.textContent=hm(work));
+    document.querySelectorAll('[data-live="total"]').forEach(el=>el.textContent=hm(work+mins(j.travelMs)));
+  }
+}
+
+/* ---------- Edit / add dialog ---------- */
+function openDialog(k,id){
+  const j=id?findJob(k,id):null;
+  if(j&&isActive(j)){alert('Finish this job before editing it.');return}
+  editing={date:k,id:j?.id||null};
+  $('dlgTitle').textContent=j?'Edit Job':'Add Job by Hand';
+  $('fDate').value=k;$('fName').value=j?.name||'';
+  $('fNumber').innerHTML=codeOptions(j?.number);$('fNumber').value=j?.number||'';
+  const t=mins(j?.travelMs),w=mins(j?.workMs);
+  $('fTravelH').value=Math.floor(t/60);$('fTravelM').value=t%60;
+  $('fWorkH').value=Math.floor(w/60);$('fWorkM').value=w%60;
+  updateDialogTotal();$('jobDialog').showModal();
+  if(!j)$('fName').focus();
+}
+function formMins(h,m){return Math.max(0,Math.round((Number($(h).value)||0)*60+(Number($(m).value)||0)))}
+function updateDialogTotal(){$('fTotal').textContent=hm(formMins('fTravelH','fTravelM')+formMins('fWorkH','fWorkM'))}
+$('jobForm').addEventListener('input',updateDialogTotal);
+$('dlgCancel').onclick=()=>$('jobDialog').close();
+$('jobForm').onsubmit=e=>{
+  e.preventDefault();
+  const date=$('fDate').value,name=$('fName').value.trim(),number=$('fNumber').value.trim();
+  if(!date||!name){alert('Enter a date and job name.');return}
+  const travelMs=formMins('fTravelH','fTravelM')*60000,workMs=formMins('fWorkH','fWorkM')*60000;
+  let j=editing.id&&findJob(editing.date,editing.id);
+  if(j){
+    if(mins(j.travelMs)*60000!==travelMs||mins(j.workMs)*60000!==workMs)j.edited=true;
+    if(date!==editing.date){day(editing.date).jobs=jobsOn(editing.date).filter(x=>x!==j);day(date).jobs.push(j)}
+    Object.assign(j,{name,number,travelMs,workMs});
+  }else{
+    day(date).jobs.push({id:newId(),name,number,travelMs,workMs,startedAt:null,endedAt:null,manual:true});
+  }
+  openDays.add(date);$('jobDialog').close();render();
+};
+
+/* ---------- Buttons ---------- */
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-action]');if(!b)return;
+  const a=b.dataset.action,k=b.dataset.date,id=b.dataset.id;
+  if(timerActions[a])return timerActions[a]();
+  if(a==='add')openDialog(k||todayKey());
+  if(a==='edit')openDialog(k,id);
+  if(a==='delete'){
+    const j=findJob(k,id);if(!j||!confirm(`Delete "${j.name}"?`))return;
+    if(isActive(j))state.current=null;
+    day(k).jobs=jobsOn(k).filter(x=>x!==j);render();
+  }
+  if(a==='toggle-day'){openDays.has(k)?openDays.delete(k):openDays.add(k);render()}
+  if(a==='delete-day'){
+    if(!confirm(`Delete all ${jobsOn(k).length} job(s) on ${dayLabel(k)}?`))return;
+    if(state.current?.date===k)state.current=null;
+    delete state.days[k];render();
+  }
+});
+
+$('endDayBtn').onclick=()=>{
+  const k=todayKey(),c=state.current;
+  if(c){
+    if(!confirm(c.type==='work'?'Finish the job in progress and end the day?':'Stop travel (the drive home is not billed) and end the day?'))return;
+    if(c.type==='work')finishWork();else state.current=null;
+  }
+  if(!jobsOn(k).length){render();alert('No jobs recorded today.');return}
+  day(k).saved=true;render();
+  alert('Day saved. Billable today: '+hm(totalsFor([k]).total));
+};
+
+// A job saved with a code that is no longer in the list keeps it as an extra option.
+function codeOptions(extra){
+  const codes=extra&&!JOB_CODES.includes(extra)?[...JOB_CODES,extra]:JOB_CODES;
+  return '<option value="">Job # (optional)</option>'+codes.map(c=>`<option>${esc(c)}</option>`).join('');
+}
+$('jobNumber').innerHTML=codeOptions();
+
+$('setName').value=state.settings.name;$('setEmail').value=state.settings.email;
+$('setName').oninput=e=>{state.settings.name=e.target.value.trim();save();render()};
+$('setEmail').oninput=e=>{state.settings.email=e.target.value.trim();save();render()};
+
+$('prevWeek').onclick=()=>{weekStart=addDays(weekStart,-7);render()};
+$('nextWeek').onclick=()=>{weekStart=addDays(weekStart,7);render()};
+$('weekStart').onchange=e=>{if(e.target.value){weekStart=e.target.value;render()}};
+
+/* ---------- Weekly CSV + send ---------- */
+function weekCsv(){
+  const keys=weekKeys(),long={weekday:'long',month:'short',day:'numeric',year:'numeric'};
+  const rows=[['Employee',state.settings.name],['Week',dayLabel(keys[0],long)+' to '+dayLabel(keys[6],long)],[],
+    ['Date / Job','Job #','Time traveled (min)','Time worked (min)','Total billed to job (min)','Total billed (hours)','Notes']];
+  keys.forEach(k=>{
+    const jobs=jobsOn(k);if(!jobs.length)return;
+    rows.push([dayLabel(k,long)]);
+    jobs.forEach(j=>{const t=mins(j.travelMs),w=mins(j.workMs);rows.push([j.name,j.number,t,w,t+w,hours(t+w),j.manual?'Added by hand':j.edited?'Times edited':''])});
+    const d=totalsFor([k]);rows.push(['Day total','',d.travel,d.work,d.total,hours(d.total)],[]);
+  });
+  const w=totalsFor(keys);rows.push(['Week total','',w.travel,w.work,w.total,hours(w.total)]);
+  const byCode={};
+  keys.forEach(k=>jobsOn(k).forEach(j=>{
+    const r=byCode[j.number||'No job #']??={travel:0,work:0};
+    r.travel+=mins(j.travelMs);r.work+=mins(j.workMs);
+  }));
+  const others=Object.keys(byCode).filter(c=>!JOB_CODES.includes(c)&&c!=='No job #');
+  rows.push([],['Billable hours by job #'],['Job #','','Time traveled (min)','Time worked (min)','Total billed (min)','Total billed (hours)']);
+  [...JOB_CODES,...others,'No job #'].filter(c=>byCode[c]).forEach(c=>{
+    const r=byCode[c];rows.push([c,'',r.travel,r.work,r.travel+r.work,hours(r.travel+r.work)]);
+  });
+  return rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
+}
+function csvName(){return `time-${(state.settings.name||'employee').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}-week-of-${weekStart}.csv`}
+function downloadCsv(){
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([weekCsv()],{type:'text/csv'}));a.download=csvName();a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function weekHasTime(){if(weekKeys().some(k=>jobsOn(k).length))return true;alert('No time recorded for this week.');return false}
+$('csvBtn').onclick=()=>{if(weekHasTime())downloadCsv()};
+$('sendBtn').onclick=async()=>{
+  const s=state.settings;
+  if(!s.name||!/\S+@\S+\.\S+/.test(s.email)){alert('Add your name and the office email in Settings first.');$('settings').open=true;$('setName').focus();return}
+  if(!weekHasTime())return;
+  const k=todayKey(),warn=[];
+  if(state.current)warn.push('a timer is still running and will not be included');
+  if(weekKeys().includes(k)&&jobsOn(k).length&&!state.days[k].saved)warn.push('today has not been ended and saved');
+  if(warn.length&&!confirm('Heads up: '+warn.join(', and ')+'. Send anyway?'))return;
+  const w=totalsFor(weekKeys());
+  const subject=`Timesheet – ${s.name} – week of ${dayLabel(weekStart,{month:'short',day:'numeric',year:'numeric'})}`;
+  const body=`${subject}\nTravel: ${hm(w.travel)}\nWork: ${hm(w.work)}\nTotal billable: ${hm(w.total)}\n`;
+  const file=new File([weekCsv()],csvName(),{type:'text/csv'});
+  if(navigator.canShare?.({files:[file]})){
+    try{await navigator.share({files:[file],title:subject,text:body});return}
+    catch(e){if(e.name==='AbortError')return}
+  }
+  downloadCsv();
+  alert(`The CSV was downloaded as ${csvName()}. Your email app will open next. Attach that file before you send.`);
+  location.href=`mailto:${s.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+};
+
+setInterval(tick,1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
+render();
+</script>
+</body>
+</html>
