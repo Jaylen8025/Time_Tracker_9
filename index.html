@@ -353,12 +353,13 @@ $('weekStart').onchange=e=>{if(e.target.value){weekStart=e.target.value;render()
 
 /* ---------- Weekly Excel timesheet + send ---------- */
 // Cell styles: [number format, font, fill, border, alignment]. Number formats: 0 general, 1 "0", 2 "0.00".
-const FONTS=[[11,0,'000000'],[11,1,'111827'],[16,1,'111827'],[11,1,'FFFFFF'],[11,1,'9C0006'],[13,1,'111827'],[12,1,'111827'],[11,1,'9A3412']];
-const FILLS=['1F2937','FFC7CE','E5E7EB','DC2626','FED7AA','DBEAFE']; // fill ids start at 2
+const FONTS=[[11,0,'000000'],[11,1,'111827'],[16,1,'111827'],[11,1,'FFFFFF'],[11,1,'9C0006'],[13,1,'111827'],[12,1,'111827'],[11,1,'9A3412'],[11,1,'006100'],[12,1,'006100']];
+const FILLS=['1F2937','FFC7CE','E5E7EB','DC2626','FED7AA','DBEAFE','C6EFCE']; // fill ids start at 2
 const STYLES={def:[0,0,0,0],title:[0,2,0,0],label:[0,1,0,0],value:[0,6,0,0],head:[0,3,1,1,'center'],
   text:[0,0,0,1],num:[2,0,0,1],ot:[2,4,2,1],
   banner:[0,3,4,1,'center'],emergency:[0,7,5,1,'center'],section:[0,5,0,0],
   codeNum:[2,0,0,1],codeOt:[2,4,2,1],weekText:[0,1,6,1],weekNum:[2,1,6,1],weekOt:[2,4,6,1],
+  reg:[2,0,7,1],weekReg:[2,8,7,1],sumReg:[2,9,7,1], // Regular hours: light green
   sumLabel:[0,6,0,1],sumNum:[2,6,0,1],sumOt:[2,4,2,1],sumInt:[1,6,0,1],sumText:[0,6,0,1,'right'],sumYes:[0,3,4,1,'center']};
 const STYLE_IDS=Object.fromEntries(Object.keys(STYLES).map((k,i)=>[k,i]));
 const XLSX_TYPE='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -373,7 +374,7 @@ function weekSheet(){
     ['Date','Customer / Job','Job #','Travel (hrs)','Work (hrs)','Total (hrs)','Regular (hrs)','Overtime (hrs)','After-hours emergency','Notes'].map(h=>c(h,'head'))];
   const blank=()=>({travel:0,work:0,reg:0,ot:0}),week=blank(),byCode={},emergency={count:0,mins:0};
   const add=(r,t,w,reg)=>{r.travel+=t;r.work+=w;r.reg+=reg;r.ot+=t+w-reg};
-  const totals=(r,pre)=>{const num=pre+'Num',ot=r.ot?pre+'Ot':num;return [c(hrs(r.travel),num),c(hrs(r.work),num),c(hrs(r.travel+r.work),num),c(hrs(r.reg),num),c(hrs(r.ot),ot)]};
+  const totals=(r,pre)=>{const num=pre+'Num',ot=r.ot?pre+'Ot':num;return [c(hrs(r.travel),num),c(hrs(r.work),num),c(hrs(r.travel+r.work),num),c(hrs(r.reg),!r.reg?num:pre==='week'?'weekReg':'reg'),c(hrs(r.ot),ot)]};
   // Jobs count toward 40 hours in order (by day, then as listed); the job that crosses 40 is split.
   let used=0;
   const daily=[];
@@ -385,7 +386,7 @@ function weekSheet(){
       if(reg<t+w&&used<=OT_MINS)rows.push([c('OVERTIME STARTS HERE (over 40 hours)'+(reg?': the next job is split between Regular and Overtime':': hours below are overtime'),'banner',10)]);
       used+=t+w;
       rows.push([c(date,'text'),c(j.name,'text'),c(j.number,'text'),c(hrs(t),'num'),c(hrs(w),'num'),c(hrs(t+w),'num'),
-        c(reg?hrs(reg):'','num'),c(t+w-reg?hrs(t+w-reg):'',t+w-reg?'ot':'num'),c(j.afterHours?'YES':'',j.afterHours?'emergency':'text'),
+        c(reg?hrs(reg):'',reg?'reg':'num'),c(t+w-reg?hrs(t+w-reg):'',t+w-reg?'ot':'num'),c(j.afterHours?'YES':'',j.afterHours?'emergency':'text'),
         c(j.manual?'Added by hand':j.edited?'Times edited':'','text')]);
       add(d,t,w,reg);add(week,t,w,reg);add(byCode[j.number||'No job #']??=blank(),t,w,reg);
       if(j.afterHours){emergency.count++;emergency.mins+=t+w}
@@ -399,7 +400,7 @@ function weekSheet(){
   [...JOB_CODES,...others,'No job #'].filter(k=>byCode[k]).forEach(k=>rows.push([c(k,'text',3),...totals(byCode[k],'code')]));
   const onCall=state.weeks[weekStart]?.onCall;
   rows.push([],[c('Week Summary','section',3)],
-    [c('Regular hours','sumLabel',3),c(hrs(week.reg),'sumNum')],
+    [c('Regular hours','sumLabel',3),c(hrs(week.reg),week.reg?'sumReg':'sumNum')],
     [c('Overtime hours','sumLabel',3),c(hrs(week.ot),week.ot?'sumOt':'sumNum')],
     [c('Total hours','sumLabel',3),c(hrs(week.travel+week.work),'sumNum')],
     [c('After-hours emergency calls','sumLabel',3),c(emergency.count,'sumInt')],
