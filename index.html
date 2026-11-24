@@ -99,7 +99,7 @@ dialog::backdrop{background:#0007}
 <div class="oncall" id="onCallBox"><b>Were you on call for this pay period?</b><div class="seg"><button data-action="oncall" data-value="yes">Yes</button><button data-action="oncall" data-value="no">No</button></div></div>
 <button id="sendBtn" class="green wide" style="margin-top:8px">Send Week to Office</button>
 <p class="small" id="sendHint"></p>
-<button id="csvBtn" class="link wide">Download CSV instead</button>
+<button id="downloadBtn" class="link wide">Download Excel file instead</button>
 </section>
 </main>
 <datalist id="jobNames"></datalist>
@@ -163,7 +163,7 @@ function findJob(k,id){return jobsOn(k).find(j=>j.id===id)}
 function elapsed(){return state.current?Math.max(0,Date.now()-state.current.startedAt):0}
 function isActive(j){return state.current?.type==='work'&&state.current.jobId===j.id}
 function workMs(j,live){return (j.workMs||0)+(live&&isActive(j)?elapsed():0)}
-// Minutes are rounded per job, then summed, so the app matches the CSV.
+// Minutes are rounded per job, then summed, so the app matches the Excel file.
 function totalsFor(keys,live){
   let travel=0,work=0;
   keys.forEach(k=>jobsOn(k).forEach(j=>{travel+=mins(j.travelMs);work+=mins(workMs(j,live))}));
@@ -225,7 +225,7 @@ function render(){
   renderWeek();
   const names=[...new Set(Object.keys(state.days).sort().reverse().flatMap(d=>jobsOn(d).map(j=>j.name)))];
   $('jobNames').innerHTML=names.map(n=>`<option value="${esc(n)}">`).join('');
-  $('sendHint').textContent=s.email?`Choose your email app, send to ${s.email}. The CSV file is attached for you.`:'Add the office email in Settings first.';
+  $('sendHint').textContent=s.email?`Choose your email app, send to ${s.email}. The Excel timesheet is attached for you.`:'Add the office email in Settings first.';
   if(!s.name||!s.email)$('settings').open=true;
   tick();save();
 }
@@ -351,43 +351,125 @@ $('prevWeek').onclick=()=>{weekStart=addDays(weekStart,-7);render()};
 $('nextWeek').onclick=()=>{weekStart=addDays(weekStart,7);render()};
 $('weekStart').onchange=e=>{if(e.target.value){weekStart=e.target.value;render()}};
 
-/* ---------- Weekly CSV + send ---------- */
-function weekCsv(){
-  const keys=weekKeys(),long={weekday:'long',month:'short',day:'numeric',year:'numeric'};
-  const rows=[['Employee',state.settings.name],['Week',dayLabel(keys[0],long)+' to '+dayLabel(keys[6],long)],[],
-    ['Date / Job','Job #','Time traveled (min)','Time worked (min)','Total billed to job (min)','Total billed (hours)','Regular (hours)','OVERTIME (hours)','After hours emergency','Notes']];
+/* ---------- Weekly Excel timesheet + send ---------- */
+// Cell styles: [number format, font, fill, border, alignment]. Number formats: 0 general, 1 "0", 2 "0.00".
+const FONTS=[[11,0,'000000'],[11,1,'111827'],[16,1,'111827'],[11,1,'FFFFFF'],[11,1,'9C0006'],[13,1,'111827'],[12,1,'111827'],[11,1,'9A3412']];
+const FILLS=['1F2937','FFC7CE','E5E7EB','DC2626','FED7AA','DBEAFE']; // fill ids start at 2
+const STYLES={def:[0,0,0,0],title:[0,2,0,0],label:[0,1,0,0],value:[0,6,0,0],head:[0,3,1,1,'center'],
+  text:[0,0,0,1],num:[2,0,0,1],ot:[2,4,2,1],dayText:[0,1,3,1],dayNum:[2,1,3,1],dayOt:[2,4,3,1],
+  banner:[0,3,4,1,'center'],emergency:[0,7,5,1,'center'],section:[0,5,0,0],
+  codeNum:[2,0,0,1],codeOt:[2,4,2,1],weekText:[0,1,6,1],weekNum:[2,1,6,1],weekOt:[2,4,6,1],
+  sumLabel:[0,6,0,1],sumNum:[2,6,0,1],sumOt:[2,4,2,1],sumInt:[1,6,0,1],sumText:[0,6,0,1,'right'],sumYes:[0,3,4,1,'center']};
+const STYLE_IDS=Object.fromEntries(Object.keys(STYLES).map((k,i)=>[k,i]));
+const XLSX_TYPE='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+// Builds the week as rows of cells {v, s, span}. Columns: A Date … J Notes.
+function weekSheet(){
+  const keys=weekKeys(),long={weekday:'short',month:'short',day:'numeric',year:'numeric'};
+  const c=(v,s,span)=>({v,s,span}),hrs=m=>m/60;
+  const rows=[[c('Weekly Timesheet','title',10)],
+    [c('Employee','label'),c(state.settings.name,'value',4)],
+    [c('Week','label'),c(dayLabel(keys[0],long)+'  to  '+dayLabel(keys[6],long),'value',4)],[],
+    ['Date','Customer / Job','Job #','Travel (hrs)','Work (hrs)','Total (hrs)','Regular (hrs)','Overtime (hrs)','After-hours emergency','Notes'].map(h=>c(h,'head'))];
   const blank=()=>({travel:0,work:0,reg:0,ot:0}),week=blank(),byCode={},emergency={count:0,mins:0};
   const add=(r,t,w,reg)=>{r.travel+=t;r.work+=w;r.reg+=reg;r.ot+=t+w-reg};
-  const totalRow=(label,r)=>[label,'',r.travel,r.work,r.travel+r.work,hours(r.travel+r.work),hours(r.reg),hours(r.ot)];
+  const totals=(r,pre)=>{const num=pre+'Num',ot=r.ot?pre+'Ot':num;return [c(hrs(r.travel),num),c(hrs(r.work),num),c(hrs(r.travel+r.work),num),c(hrs(r.reg),num),c(hrs(r.ot),ot)]};
   // Jobs count toward 40 hours in order (by day, then as listed); the job that crosses 40 is split.
   let used=0;
   keys.forEach(k=>{
     const jobs=jobsOn(k);if(!jobs.length)return;
-    const d=blank();rows.push([dayLabel(k,long)]);
+    const d=blank(),date=dayLabel(k,{weekday:'short',month:'numeric',day:'numeric'});
     jobs.forEach(j=>{
       const t=mins(j.travelMs),w=mins(j.workMs),reg=Math.max(0,Math.min(t+w,OT_MINS-used));
-      if(reg<t+w&&used<=OT_MINS)rows.push([],['********** OVERTIME STARTS HERE (OVER 40 HOURS) **********'],
-        [reg?'The next job is split: part regular, part overtime. See the Regular and OVERTIME columns.':'Everything below goes in the OVERTIME column.'],[]);
+      if(reg<t+w&&used<=OT_MINS)rows.push([c('OVERTIME STARTS HERE (over 40 hours)'+(reg?': the next job is split between Regular and Overtime':': hours below are overtime'),'banner',10)]);
       used+=t+w;
-      rows.push([j.name,j.number,t,w,t+w,hours(t+w),hours(reg),hours(t+w-reg),j.afterHours?'YES':'',j.manual?'Added by hand':j.edited?'Times edited':'']);
+      rows.push([c(date,'text'),c(j.name,'text'),c(j.number,'text'),c(hrs(t),'num'),c(hrs(w),'num'),c(hrs(t+w),'num'),
+        c(reg?hrs(reg):'','num'),c(t+w-reg?hrs(t+w-reg):'',t+w-reg?'ot':'num'),c(j.afterHours?'YES':'',j.afterHours?'emergency':'text'),
+        c(j.manual?'Added by hand':j.edited?'Times edited':'','text')]);
       add(d,t,w,reg);add(week,t,w,reg);add(byCode[j.number||'No job #']??=blank(),t,w,reg);
       if(j.afterHours){emergency.count++;emergency.mins+=t+w}
     });
-    rows.push(totalRow('Day total',d),[]);
+    rows.push([c(date,'dayText'),c('Day total','dayText'),c('','dayText'),...totals(d,'day'),c('','dayText'),c('','dayText')]);
   });
-  rows.push(totalRow('Week total',week));
-  const others=Object.keys(byCode).filter(c=>!JOB_CODES.includes(c)&&c!=='No job #');
-  rows.push([],['Billable hours by job #'],['Job #','','Time traveled (min)','Time worked (min)','Total billed (min)','Total billed (hours)','Regular (hours)','OVERTIME (hours)']);
-  [...JOB_CODES,...others,'No job #'].filter(c=>byCode[c]).forEach(c=>rows.push(totalRow(c,byCode[c])));
-  rows.push([],['WEEK SUMMARY'],['Regular hours',hours(week.reg)],
-    [week.ot?'*** OVERTIME HOURS ***':'Overtime hours',hours(week.ot)],
-    ['After hours emergency calls',emergency.count],['After hours emergency hours',hours(emergency.mins)],
-    state.weeks[weekStart]?.onCall?['*** ON CALL THIS PAY PERIOD: YES ***']:['On call this pay period','No']);
-  return rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  rows.push([c('WEEK TOTAL','weekText',3),...totals(week,'week'),c('','weekText'),c('','weekText')],[]);
+  const others=Object.keys(byCode).filter(k=>!JOB_CODES.includes(k)&&k!=='No job #');
+  rows.push([c('Hours by Job #','section',3)],
+    [c('Job #','head',3),...['Travel (hrs)','Work (hrs)','Total (hrs)','Regular (hrs)','Overtime (hrs)'].map(h=>c(h,'head'))]);
+  [...JOB_CODES,...others,'No job #'].filter(k=>byCode[k]).forEach(k=>rows.push([c(k,'text',3),...totals(byCode[k],'code')]));
+  const onCall=state.weeks[weekStart]?.onCall;
+  rows.push([],[c('Week Summary','section',3)],
+    [c('Regular hours','sumLabel',3),c(hrs(week.reg),'sumNum')],
+    [c('Overtime hours','sumLabel',3),c(hrs(week.ot),week.ot?'sumOt':'sumNum')],
+    [c('Total hours','sumLabel',3),c(hrs(week.travel+week.work),'sumNum')],
+    [c('After-hours emergency calls','sumLabel',3),c(emergency.count,'sumInt')],
+    [c('After-hours emergency hours','sumLabel',3),c(hrs(emergency.mins),'sumNum')],
+    [c('On call this pay period','sumLabel',3),c(onCall?'YES':'No',onCall?'sumYes':'sumText')]);
+  return rows;
 }
-function csvName(){return `time-${(state.settings.name||'employee').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}-week-of-${weekStart}.csv`}
-function downloadCsv(){
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([weekCsv()],{type:'text/csv'}));a.download=csvName();a.click();
+function xmlEsc(s){return String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}
+function sheetXml(rows){
+  const col=i=>String.fromCharCode(65+i),merges=[];
+  const cell=(ref,v,s)=>v===''||v==null?`<c r="${ref}" s="${s}"/>`:typeof v==='number'?`<c r="${ref}" s="${s}"><v>${v}</v></c>`
+    :`<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
+  const data=rows.map((cells,ri)=>{
+    let ci=0,out='';const r=ri+1;
+    cells.forEach(({v,s,span=1})=>{
+      for(let k=0;k<span;k++)out+=cell(col(ci+k)+r,k?'':v,STYLE_IDS[s]);
+      if(span>1)merges.push(`<mergeCell ref="${col(ci)}${r}:${col(ci+span-1)}${r}"/>`);
+      ci+=span;
+    });
+    const ht={title:26,head:32}[cells[0]?.s];
+    return `<row r="${r}"${ht?` ht="${ht}" customHeight="1"`:''}>${out}</row>`;
+  }).join('');
+  const widths=[13,30,15,11,11,11,12,13,13,16];
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>`+
+    `<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="5" topLeftCell="A6" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18" customHeight="1"/>`+
+    `<cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>`+
+    `<sheetData>${data}</sheetData><mergeCells count="${merges.length}">${merges.join('')}</mergeCells>`+
+    `<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="1"/></worksheet>`;
+}
+function stylesXml(){
+  const side=n=>`<${n} style="thin"><color rgb="FFD1D5DB"/></${n}>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`+
+    `<fonts count="${FONTS.length}">${FONTS.map(([sz,b,rgb])=>`<font>${b?'<b/>':''}<sz val="${sz}"/><color rgb="FF${rgb}"/><name val="Calibri"/><family val="2"/></font>`).join('')}</fonts>`+
+    `<fills count="${FILLS.length+2}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${FILLS.map(rgb=>`<fill><patternFill patternType="solid"><fgColor rgb="FF${rgb}"/><bgColor indexed="64"/></patternFill></fill>`).join('')}</fills>`+
+    `<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border>${['left','right','top','bottom'].map(side).join('')}<diagonal/></border></borders>`+
+    `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`+
+    `<cellXfs count="${Object.keys(STYLES).length}">${Object.values(STYLES).map(([fmt,font,fill,b,align])=>
+      `<xf numFmtId="${fmt}" fontId="${font}" fillId="${fill?fill+1:0}" borderId="${b}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"${align?` horizontal="${align}"`:''}${align==='center'?' wrapText="1"':''}/></xf>`).join('')}</cellXfs>`+
+    `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+}
+// Minimal .xlsx (a zip of XML files, stored without compression) so the app needs no library.
+const CRC_TABLE=Uint32Array.from({length:256},(_,n)=>{for(let k=0;k<8;k++)n=n&1?0xEDB88320^(n>>>1):n>>>1;return n>>>0});
+function crc32(bytes){let c=~0;for(const b of bytes)c=CRC_TABLE[(c^b)&255]^(c>>>8);return ~c>>>0}
+function zipStore(files){
+  const enc=new TextEncoder(),parts=[],central=[];let offset=0;
+  const put=(view,fields)=>fields.forEach(([o,v,size])=>size===4?view.setUint32(o,v,true):view.setUint16(o,v,true));
+  for(const [name,text] of Object.entries(files)){
+    const n=enc.encode(name),d=enc.encode(text),crc=crc32(d);
+    const local=new DataView(new ArrayBuffer(30)),dir=new DataView(new ArrayBuffer(46));
+    put(local,[[0,0x04034b50,4],[4,20,2],[12,0x21,2],[14,crc,4],[18,d.length,4],[22,d.length,4],[26,n.length,2]]);
+    put(dir,[[0,0x02014b50,4],[4,20,2],[6,20,2],[14,0x21,2],[16,crc,4],[20,d.length,4],[24,d.length,4],[28,n.length,2],[42,offset,4]]);
+    parts.push(local,n,d);central.push(dir,n);offset+=30+n.length+d.length;
+  }
+  const size=central.reduce((a,p)=>a+p.byteLength,0),count=Object.keys(files).length,end=new DataView(new ArrayBuffer(22));
+  put(end,[[0,0x06054b50,4],[8,count,2],[10,count,2],[12,size,4],[16,offset,4]]);
+  return new Blob([...parts,...central,end],{type:XLSX_TYPE});
+}
+function weekXlsx(){
+  const ns='http://schemas.openxmlformats.org',head='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  return zipStore({
+    '[Content_Types].xml':`${head}<Types xmlns="${ns}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
+    '_rels/.rels':`${head}<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    'xl/workbook.xml':`${head}<workbook xmlns="${ns}/spreadsheetml/2006/main" xmlns:r="${ns}/officeDocument/2006/relationships"><sheets><sheet name="Timesheet" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    'xl/_rels/workbook.xml.rels':`${head}<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${ns}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    'xl/styles.xml':stylesXml(),
+    'xl/worksheets/sheet1.xml':sheetXml(weekSheet())
+  });
+}
+function fileName(){return `timesheet-${(state.settings.name||'employee').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}-week-of-${weekStart}.xlsx`}
+function downloadFile(){
+  const a=document.createElement('a');a.href=URL.createObjectURL(weekXlsx());a.download=fileName();a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 function onCallAnswered(){
@@ -396,7 +478,7 @@ function onCallAnswered(){
   $('onCallBox').scrollIntoView({behavior:'smooth',block:'center'});return false;
 }
 function weekHasTime(){if(weekKeys().some(k=>jobsOn(k).length))return true;alert('No time recorded for this week.');return false}
-$('csvBtn').onclick=()=>{if(weekHasTime()&&onCallAnswered())downloadCsv()};
+$('downloadBtn').onclick=()=>{if(weekHasTime()&&onCallAnswered())downloadFile()};
 $('sendBtn').onclick=async()=>{
   const s=state.settings;
   if(!s.name||!/\S+@\S+\.\S+/.test(s.email)){alert('Add your name and the office email in Settings first.');$('settings').open=true;$('setName').focus();return}
@@ -407,14 +489,15 @@ $('sendBtn').onclick=async()=>{
   if(warn.length&&!confirm('Heads up: '+warn.join(', and ')+'. Send anyway?'))return;
   const w=totalsFor(weekKeys());
   const subject=`Timesheet – ${s.name} – week of ${dayLabel(weekStart,{month:'short',day:'numeric',year:'numeric'})}`;
-  const body=`${subject}\nTravel: ${hm(w.travel)}\nWork: ${hm(w.work)}\nTotal billable: ${hm(w.total)}\n`;
-  const file=new File([weekCsv()],csvName(),{type:'text/csv'});
+  const ot=Math.max(0,w.total-OT_MINS);
+  const body=`${subject}\nTotal billable: ${hm(w.total)}\nRegular: ${hm(w.total-ot)}\nOvertime: ${hm(ot)}\nOn call: ${state.weeks[weekStart].onCall?'Yes':'No'}\n`;
+  const file=new File([weekXlsx()],fileName(),{type:XLSX_TYPE});
   if(navigator.canShare?.({files:[file]})){
     try{await navigator.share({files:[file],title:subject,text:body});return}
     catch(e){if(e.name==='AbortError')return}
   }
-  downloadCsv();
-  alert(`The CSV was downloaded as ${csvName()}. Your email app will open next. Attach that file before you send.`);
+  downloadFile();
+  alert(`The timesheet was downloaded as ${fileName()}. Your email app will open next. Attach that file before you send.`);
   location.href=`mailto:${s.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 };
 
