@@ -42,7 +42,13 @@ dialog{border:0;border-radius:12px;padding:18px;width:min(460px,94vw);box-shadow
 dialog::backdrop{background:#0007}
 .hm{display:flex;gap:8px}.hm label{flex:1;display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}.hm input{flex:1;min-width:0}
 .dlgtotal{margin:14px 0;padding:10px;background:#eff6ff;border-radius:8px;text-align:center}
-@media(max-width:520px){main{padding:10px 10px 80px}}
+.check{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:15px;color:var(--text)}.check input{width:22px;height:22px;margin:0;flex:none}
+.pill.alert{background:#fee2e2;color:#991b1b}
+.oncall{margin-top:12px;padding:12px;border:2px solid #fdba74;background:#fff7ed;border-radius:10px}.oncall.answered{border:1px solid #e5e7eb;background:#f9fafb}
+.seg{display:flex;gap:8px;margin-top:8px}.seg button{flex:1;background:#fff;color:var(--text);border:1px solid var(--line)}.seg button.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.otnote{margin-top:8px;padding:10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-weight:700;text-align:center}
+.stat b{white-space:nowrap}
+@media(max-width:520px){main{padding:10px 10px 80px}.stat b{font-size:17px}}
 </style>
 </head>
 <body>
@@ -64,6 +70,7 @@ dialog::backdrop{background:#0007}
 <div class="bigtime" id="liveTimer">00:00:00</div>
 <label class="lbl" id="jobLabel" for="jobName">Job</label>
 <div class="row"><input id="jobName" list="jobNames" placeholder="Customer / job" autocomplete="off"><select id="jobNumber" aria-label="Job #"></select></div>
+<label class="check"><input type="checkbox" id="jobAfterHours">After hours emergency call</label>
 <div class="row" id="timerButtons" style="margin-top:10px"></div>
 <p class="small">The timer keeps counting if you lock your phone or switch apps.</p>
 </section>
@@ -88,6 +95,8 @@ dialog::backdrop{background:#0007}
 <div class="stat"><b id="weekWork">0h 00m</b><span>Work</span></div>
 <div class="stat total"><b id="weekTotal">0h 00m</b><span>Billable</span></div>
 </div>
+<div id="weekOT" class="otnote" hidden></div>
+<div class="oncall" id="onCallBox"><b>Were you on call for this pay period?</b><div class="seg"><button data-action="oncall" data-value="yes">Yes</button><button data-action="oncall" data-value="no">No</button></div></div>
 <button id="sendBtn" class="green wide" style="margin-top:8px">Send Week to Office</button>
 <p class="small" id="sendHint"></p>
 <button id="csvBtn" class="link wide">Download CSV instead</button>
@@ -101,6 +110,7 @@ dialog::backdrop{background:#0007}
 <label class="lbl" for="fDate">Date</label><input id="fDate" type="date" required>
 <label class="lbl" for="fName">Job name or customer</label><input id="fName" list="jobNames" autocomplete="off" required>
 <label class="lbl" for="fNumber">Job #</label><select id="fNumber"></select>
+<label class="check"><input type="checkbox" id="fAfterHours">After hours emergency call</label>
 <span class="lbl">Travel time to this job</span>
 <div class="hm"><label><input id="fTravelH" type="number" min="0" inputmode="numeric">hr</label><label><input id="fTravelM" type="number" min="0" inputmode="numeric">min</label></div>
 <span class="lbl">Time worked at this job</span>
@@ -118,6 +128,8 @@ const JOB_CODES=['Plumbing-01','Heating-02','Plumbing-21','Heating-22','Plumbing
 let state=load();
 // Phones that saved settings before the office email was built in get it too.
 if(!state.settings.email)state.settings.email=OFFICE_EMAIL;
+state.weeks??={}; // per week: {onCall:true|false}
+const OT_MINS=40*60; // billable minutes per week before overtime
 let weekStart=mondayOf(todayKey());
 const openDays=new Set();
 let editing=null;
@@ -160,13 +172,13 @@ function totalsFor(keys,live){
 
 /* ---------- Timer ---------- */
 function startWork(travelMs){
-  const name=$('jobName').value.trim(),number=$('jobNumber').value.trim();
+  const name=$('jobName').value.trim(),number=$('jobNumber').value.trim(),afterHours=$('jobAfterHours').checked;
   if(!name){alert('Enter the job name or customer first.');$('jobName').focus();return}
   const k=todayKey(),t=Date.now(),id=newId();
-  day(k).jobs.push({id,name,number,travelMs:travelMs||0,workMs:0,startedAt:t,endedAt:null});
+  day(k).jobs.push({id,name,number,afterHours,travelMs:travelMs||0,workMs:0,startedAt:t,endedAt:null});
   day(k).saved=false;
   state.current={type:'work',date:k,jobId:id,startedAt:t};
-  $('jobName').value='';$('jobNumber').value='';
+  $('jobName').value='';$('jobNumber').value='';$('jobAfterHours').checked=false;
   render();
 }
 function finishWork(){
@@ -224,12 +236,15 @@ function jobsHtml(k){
     const note=j.manual?'<br>Added by hand':j.edited?'<br>Times edited':'';
     return `<div class="job${a?' active':''}"><div class="jobhead"><div class="jobname">${esc(j.name)}${j.number?' <span class="small" style="white-space:nowrap">'+esc(j.number)+'</span>':''}</div>
     <span class="pill"${a?' data-live="total"':''}>${hm(t+w)}</span></div>
-    <div class="details">Travel <b>${hm(t)}</b> · Work <b${a?' data-live="work"':''}>${hm(w)}</b>${a?' · <span class="live">In progress</span>':''}${times}${note}</div>
+    <div class="details">${j.afterHours?'<span class="pill alert">After-hours emergency</span><br>':''}Travel <b>${hm(t)}</b> · Work <b${a?' data-live="work"':''}>${hm(w)}</b>${a?' · <span class="live">In progress</span>':''}${times}${note}</div>
     <div class="actions"><button class="secondary" data-action="edit" data-date="${k}" data-id="${j.id}">Edit</button><button class="red" data-action="delete" data-date="${k}" data-id="${j.id}">Delete</button></div></div>`;
   }).join('');
 }
 function renderWeek(){
   $('weekStart').value=weekStart;
+  const onCall=state.weeks[weekStart]?.onCall;
+  $('onCallBox').classList.toggle('answered',onCall!==undefined);
+  $('onCallBox').querySelectorAll('button').forEach(b=>b.classList.toggle('on',onCall!==undefined&&(b.dataset.value==='yes')===onCall));
   $('weekDays').innerHTML=weekKeys().map(k=>{
     const jobs=jobsOn(k);
     if(!jobs.length)return `<div class="day"><div class="noday"><span>${dayLabel(k)}</span><button class="secondary" data-action="add" data-date="${k}">+ Add</button></div></div>`;
@@ -246,6 +261,7 @@ function tick(){
   const t=totalsFor([todayKey()],true),w=totalsFor(weekKeys(),true);
   $('todayTravel').textContent=hm(t.travel);$('todayWork').textContent=hm(t.work);$('todayTotal').textContent=hm(t.total);
   $('weekTravel').textContent=hm(w.travel);$('weekWork').textContent=hm(w.work);$('weekTotal').textContent=hm(w.total);
+  const ot=Math.max(0,w.total-OT_MINS);$('weekOT').hidden=!ot;$('weekOT').textContent='Overtime this week: '+hm(ot)+' (over 40 hours)';
   const c=state.current,j=c?.type==='work'&&findJob(c.date,c.jobId);
   if(j){
     const work=mins(workMs(j,true));
@@ -261,7 +277,7 @@ function openDialog(k,id){
   editing={date:k,id:j?.id||null};
   $('dlgTitle').textContent=j?'Edit Job':'Add Job by Hand';
   $('fDate').value=k;$('fName').value=j?.name||'';
-  $('fNumber').innerHTML=codeOptions(j?.number);$('fNumber').value=j?.number||'';
+  $('fNumber').innerHTML=codeOptions(j?.number);$('fNumber').value=j?.number||'';$('fAfterHours').checked=!!j?.afterHours;
   const t=mins(j?.travelMs),w=mins(j?.workMs);
   $('fTravelH').value=Math.floor(t/60);$('fTravelM').value=t%60;
   $('fWorkH').value=Math.floor(w/60);$('fWorkM').value=w%60;
@@ -274,16 +290,16 @@ $('jobForm').addEventListener('input',updateDialogTotal);
 $('dlgCancel').onclick=()=>$('jobDialog').close();
 $('jobForm').onsubmit=e=>{
   e.preventDefault();
-  const date=$('fDate').value,name=$('fName').value.trim(),number=$('fNumber').value.trim();
+  const date=$('fDate').value,name=$('fName').value.trim(),number=$('fNumber').value.trim(),afterHours=$('fAfterHours').checked;
   if(!date||!name){alert('Enter a date and job name.');return}
   const travelMs=formMins('fTravelH','fTravelM')*60000,workMs=formMins('fWorkH','fWorkM')*60000;
   let j=editing.id&&findJob(editing.date,editing.id);
   if(j){
     if(mins(j.travelMs)*60000!==travelMs||mins(j.workMs)*60000!==workMs)j.edited=true;
     if(date!==editing.date){day(editing.date).jobs=jobsOn(editing.date).filter(x=>x!==j);day(date).jobs.push(j)}
-    Object.assign(j,{name,number,travelMs,workMs});
+    Object.assign(j,{name,number,afterHours,travelMs,workMs});
   }else{
-    day(date).jobs.push({id:newId(),name,number,travelMs,workMs,startedAt:null,endedAt:null,manual:true});
+    day(date).jobs.push({id:newId(),name,number,afterHours,travelMs,workMs,startedAt:null,endedAt:null,manual:true});
   }
   openDays.add(date);$('jobDialog').close();render();
 };
@@ -300,6 +316,7 @@ document.addEventListener('click',e=>{
     if(isActive(j))state.current=null;
     day(k).jobs=jobsOn(k).filter(x=>x!==j);render();
   }
+  if(a==='oncall'){state.weeks[weekStart]={...state.weeks[weekStart],onCall:b.dataset.value==='yes'};render()}
   if(a==='toggle-day'){openDays.has(k)?openDays.delete(k):openDays.add(k);render()}
   if(a==='delete-day'){
     if(!confirm(`Delete all ${jobsOn(k).length} job(s) on ${dayLabel(k)}?`))return;
@@ -338,24 +355,34 @@ $('weekStart').onchange=e=>{if(e.target.value){weekStart=e.target.value;render()
 function weekCsv(){
   const keys=weekKeys(),long={weekday:'long',month:'short',day:'numeric',year:'numeric'};
   const rows=[['Employee',state.settings.name],['Week',dayLabel(keys[0],long)+' to '+dayLabel(keys[6],long)],[],
-    ['Date / Job','Job #','Time traveled (min)','Time worked (min)','Total billed to job (min)','Total billed (hours)','Notes']];
+    ['Date / Job','Job #','Time traveled (min)','Time worked (min)','Total billed to job (min)','Total billed (hours)','Regular (hours)','OVERTIME (hours)','After hours emergency','Notes']];
+  const blank=()=>({travel:0,work:0,reg:0,ot:0}),week=blank(),byCode={},emergency={count:0,mins:0};
+  const add=(r,t,w,reg)=>{r.travel+=t;r.work+=w;r.reg+=reg;r.ot+=t+w-reg};
+  const totalRow=(label,r)=>[label,'',r.travel,r.work,r.travel+r.work,hours(r.travel+r.work),hours(r.reg),hours(r.ot)];
+  // Jobs count toward 40 hours in order (by day, then as listed); the job that crosses 40 is split.
+  let used=0;
   keys.forEach(k=>{
     const jobs=jobsOn(k);if(!jobs.length)return;
-    rows.push([dayLabel(k,long)]);
-    jobs.forEach(j=>{const t=mins(j.travelMs),w=mins(j.workMs);rows.push([j.name,j.number,t,w,t+w,hours(t+w),j.manual?'Added by hand':j.edited?'Times edited':''])});
-    const d=totalsFor([k]);rows.push(['Day total','',d.travel,d.work,d.total,hours(d.total)],[]);
+    const d=blank();rows.push([dayLabel(k,long)]);
+    jobs.forEach(j=>{
+      const t=mins(j.travelMs),w=mins(j.workMs),reg=Math.max(0,Math.min(t+w,OT_MINS-used));
+      if(reg<t+w&&used<=OT_MINS)rows.push([],['********** OVERTIME STARTS HERE (OVER 40 HOURS) **********'],
+        [reg?'The next job is split: part regular, part overtime. See the Regular and OVERTIME columns.':'Everything below goes in the OVERTIME column.'],[]);
+      used+=t+w;
+      rows.push([j.name,j.number,t,w,t+w,hours(t+w),hours(reg),hours(t+w-reg),j.afterHours?'YES':'',j.manual?'Added by hand':j.edited?'Times edited':'']);
+      add(d,t,w,reg);add(week,t,w,reg);add(byCode[j.number||'No job #']??=blank(),t,w,reg);
+      if(j.afterHours){emergency.count++;emergency.mins+=t+w}
+    });
+    rows.push(totalRow('Day total',d),[]);
   });
-  const w=totalsFor(keys);rows.push(['Week total','',w.travel,w.work,w.total,hours(w.total)]);
-  const byCode={};
-  keys.forEach(k=>jobsOn(k).forEach(j=>{
-    const r=byCode[j.number||'No job #']??={travel:0,work:0};
-    r.travel+=mins(j.travelMs);r.work+=mins(j.workMs);
-  }));
+  rows.push(totalRow('Week total',week));
   const others=Object.keys(byCode).filter(c=>!JOB_CODES.includes(c)&&c!=='No job #');
-  rows.push([],['Billable hours by job #'],['Job #','','Time traveled (min)','Time worked (min)','Total billed (min)','Total billed (hours)']);
-  [...JOB_CODES,...others,'No job #'].filter(c=>byCode[c]).forEach(c=>{
-    const r=byCode[c];rows.push([c,'',r.travel,r.work,r.travel+r.work,hours(r.travel+r.work)]);
-  });
+  rows.push([],['Billable hours by job #'],['Job #','','Time traveled (min)','Time worked (min)','Total billed (min)','Total billed (hours)','Regular (hours)','OVERTIME (hours)']);
+  [...JOB_CODES,...others,'No job #'].filter(c=>byCode[c]).forEach(c=>rows.push(totalRow(c,byCode[c])));
+  rows.push([],['WEEK SUMMARY'],['Regular hours',hours(week.reg)],
+    [week.ot?'*** OVERTIME HOURS ***':'Overtime hours',hours(week.ot)],
+    ['After hours emergency calls',emergency.count],['After hours emergency hours',hours(emergency.mins)],
+    state.weeks[weekStart]?.onCall?['*** ON CALL THIS PAY PERIOD: YES ***']:['On call this pay period','No']);
   return rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
 }
 function csvName(){return `time-${(state.settings.name||'employee').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}-week-of-${weekStart}.csv`}
@@ -363,12 +390,17 @@ function downloadCsv(){
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([weekCsv()],{type:'text/csv'}));a.download=csvName();a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
+function onCallAnswered(){
+  if(state.weeks[weekStart]?.onCall!==undefined)return true;
+  alert('Please answer "Were you on call for this pay period?" in the Week section first.');
+  $('onCallBox').scrollIntoView({behavior:'smooth',block:'center'});return false;
+}
 function weekHasTime(){if(weekKeys().some(k=>jobsOn(k).length))return true;alert('No time recorded for this week.');return false}
-$('csvBtn').onclick=()=>{if(weekHasTime())downloadCsv()};
+$('csvBtn').onclick=()=>{if(weekHasTime()&&onCallAnswered())downloadCsv()};
 $('sendBtn').onclick=async()=>{
   const s=state.settings;
   if(!s.name||!/\S+@\S+\.\S+/.test(s.email)){alert('Add your name and the office email in Settings first.');$('settings').open=true;$('setName').focus();return}
-  if(!weekHasTime())return;
+  if(!weekHasTime()||!onCallAnswered())return;
   const k=todayKey(),warn=[];
   if(state.current)warn.push('a timer is still running and will not be included');
   if(weekKeys().includes(k)&&jobsOn(k).length&&!state.days[k].saved)warn.push('today has not been ended and saved');
